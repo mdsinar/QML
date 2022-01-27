@@ -1,0 +1,356 @@
+import numpy as np
+
+n_samples = 60
+np.random.seed(3)
+X = 1*np.random.random((n_samples, 2))
+y = (X[:,1] > 0.5).astype(int)
+linearly_separable = (X, y)
+
+data_xs, data_ys = linearly_separable
+
+from activity_1_figure_utils import data_figure
+
+fig = data_figure(data_xs, data_ys)
+fig.show()
+
+from qiskit import QuantumCircuit
+from qiskit.circuit import ParameterVector, Parameter
+
+def build_data_embedding_circuit():
+    
+    data_params = ParameterVector('x', 2) ## ParameterVector(name, length=0), generates list of parameters
+    
+    data_embedding_circuit = QuantumCircuit(1)
+    
+    data_embedding_circuit.ry(data_params[0], 0) ## ..rx(angle, qubit#)
+    data_embedding_circuit.rz(data_params[1], 0)
+    
+    return data_embedding_circuit, data_params
+
+data_embedding_circuit, data_params = build_data_embedding_circuit()
+data_embedding_circuit.draw('mpl', scale=2)
+
+from activity_1_circuits import build_data_embedding_circuit
+
+def embed_data(parametrized_circuit, data_params, data_xs):
+    
+    data_circuits = list()
+    
+    for data_x in data_xs:
+        data_x_dict = {p:v for (p,v) in zip(data_params, data_x)}
+        data_circuit = parametrized_circuit.bind_parameters(data_x_dict)
+        data_circuits.append(data_circuit)
+        
+    return data_circuits
+
+data_circuits = embed_data(data_embedding_circuit, data_params, data_xs)
+data_circuits[0].draw('mpl', scale=2)
+
+from activity_1_figure_utils import circuits_to_statevectors, bloch_sphere_statevector_figure
+
+statevectors = circuits_to_statevectors(data_circuits)
+fig = bloch_sphere_statevector_figure(statevectors, data_ys)
+fig.show()
+
+## Now we will rotate the quantum circuit
+def build_rotation_model_circuit():
+    #first embeds data, then rotates the data
+    
+    data_params = ParameterVector('x', 2)
+    rotation_params = ParameterVector('m', 2)
+    
+    model_circuit = QuantumCircuit(1)
+    
+    model_circuit.ry(data_params[0], 0)
+    model_circuit.rz(data_params[1] + rotation_params[0],0)
+    model_circuit.ry(rotation_params[1],0)
+    
+    return model_circuit, data_params, rotation_params
+
+classifier_circuit, data_params, model_params = build_rotation_model_circuit()
+classifier_circuit.draw('mpl', scale=2)
+
+## Lets build the layered model
+def build_layered_model_circuit(n_layers=1):
+    
+    data_params = ParameterVector('x', 2)
+    weights_params = ParameterVector('w', 2*n_layers)
+    rotation_params = ParameterVector('m', 2*n_layers)
+    
+    model_params = list(rotation_params) + list(weights_params)
+    
+    model_circuit = QuantumCircuit(1)
+    
+    model_circuit.ry(weights_params[0]*data_params[0],0)
+    for l in range(0, n_layers-1):
+        model_circuit.rz(weights_params[2*l+1] * data_params[1] + rotation_params[2*l+1], 0)
+        model_circuit.ry(weights_params[2*l+2] * data_params[0] + rotation_params[2*l+2], 0)
+    
+    model_circuit.rz(weights_params[2*l+3] * data_params[1] + rotation_params[2*l+3], 0) # or 2*n_layers-1
+    model_circuit.ry(rotation_params[0],0)
+    
+    return model_circuit, data_params, model_params
+
+classifier_circuit, data_params, model_params = build_layered_model_circuit(n_layers=3)
+classifier_circuit.draw('mpl', scale=2)
+
+def prepare_all_circuits(model_circuit, data_params, model_params, data_xs, model_values, add_measurements=False):
+    
+    model_value_dict = {p:v for (p,v) in zip(model_params, model_values)}
+    classifier_circuit = model_circuit.bind_parameters(model_value_dict)
+    if add_measurements:
+        classifier_circuit.measure_all()
+    
+    all_circuits = embed_data(classifier_circuit, data_params, data_xs)
+    
+    return all_circuits
+
+classifier_circuit, data_params, model_params = build_layered_model_circuit(n_layers = 3)
+all_circuits = prepare_all_circuits(classifier_circuit, data_params, model_params, data_xs, [1,]*len(model_params), add_measurements=False)
+all_circuits[0].draw('mpl', scale=2)
+
+## Lets run the circuits on simulators
+
+from qiskit import Aer
+from qiskit.utils import QuantumInstance
+
+qasm_simulator = Aer.get_backend('qasm_simulator')
+qasm_quantum_instance = QuantumInstance(qasm_simulator, shots=1000)
+
+statevector_simulator = Aer.get_backend('statevector_simulator')
+sv_quantum_instance = QuantumInstance(statevector_simulator)
+
+all_circuits = prepare_all_circuits(classifier_circuit,data_params,model_params,data_xs,[1,]*len(model_params),add_measurements=True)
+all_results = qasm_quantum_instance.execute(all_circuits)
+print(all_results.get_counts())
+
+all_circuits = prepare_all_circuits(classifier_circuit, data_params, model_params, data_xs, [1,]*len(model_params), add_measurements=True)
+all_results = sv_quantum_instance.execute(all_circuits)
+print(all_results.get_statevector(0))
+
+def all_results_to_expectation_values(all_results):
+    """Convert results from running a list 1 qubit QuantumCircuit into Z expectation values.
+    Select between statevector and counts method based on the backend used
+
+    Args:
+        all_results : Results from runnin all the circuit
+
+    Returns:
+        np.array: All the Z expectation values.
+    """
+
+    #all_results.backend_name = 'statevector_simulator'
+    all_results.backend_name = 'qasm_simulator'
+    
+    if all_results.backend_name == 'statevector_simulator':
+        return all_statevectors_to_expectation_values(all_results)
+    else:
+        return all_counts_to_expectation_values(all_results.get_counts())
+
+
+def all_counts_to_expectation_values(all_counts):
+    """Convert a list of 1 qubit QuantumCircuit counts into Z expectation values.
+    Results from the qasm_simulator or an actual backend.
+
+    Args:
+        all_counts (list of dict): The counts resulting of running all the QuantumCircuit. One per data point.
+
+    Returns:
+        np.array: All the Z expectation values.
+    """
+
+    n_data = len(all_counts)
+    expectation_values = np.zeros((n_data,))
+    eigenvalues = {'0': 1, '1': -1}
+    for i, counts in enumerate(all_counts):
+        ### Let's code here
+        tmp1, tmp2 = 0, 0
+        for key, value in counts.items():
+            tmp1 += value * eigenvalues[key]
+            tmp2 += value
+        expectation_values[i] = tmp1/tmp2
+        ###
+
+    return expectation_values
+
+def all_statevectors_to_expectation_values(all_results):
+    """Convert the statevectors resulting of the simulation of a list of 1 qubit QuantumCircuit into Z expectation values.
+    Results from the statevector_simulator.
+
+    Args:
+        all_counts (list of dict): The result of running all the QuantumCircuit.
+
+    Returns:
+        np.array: All the Z expectation values.
+    """
+
+    n_circuits = len(all_results.results)
+    all_statevectors = np.zeros((n_circuits,2),dtype = complex)
+    for i in range(n_circuits):
+        all_statevectors[i,:] = all_results.get_statevector(i)
+
+    pauli_z_eig = np.array([1.,-1.])
+    expectation_values = np.real(np.einsum('ik,ik,k->i',all_statevectors,np.conjugate(all_statevectors),pauli_z_eig))
+
+    return expectation_values
+
+expected_values = all_results_to_expectation_values(all_results)
+print(expected_values)
+
+def eval_cost_fct_quadratic(expectation_values,target_values):
+    """Convert expectation values into cost using a quadratic distance.
+
+    Args:
+        expectation_values (np.array): Values between -1 and 1.
+        target_values (np.array): Values -1 or 1
+
+    Returns:
+        [np.array]: The computed cost of each data point.
+    """
+    
+    product_zt = expectation_values*target_values
+    all_costs = ((1 - product_zt)/2)**2
+    return all_costs
+
+target_values = 1 - 2*data_ys
+all_costs = eval_cost_fct_quadratic(expected_values,target_values)
+print(all_costs)
+
+def train_classifier(optimizer,eval_cost_fct,quantum_instance,model_circuit,data_params,model_params,data_xs,data_ys,initial_point):
+    """Train a classification model quantum circuit.
+
+    Args:
+        optimizer (Qiskit Optimizer): The optimizer used to minimize the cost function
+        eval_cost_fct (function): Computes the cost of data points given expectation values and target values
+        quantum_instance (Qiskit QuantumInstance): On which to run the QuantumCircuits.
+        model_circuit (QuantumCircuit): The parametrized QuantumCircuit model.
+        data_params ([type]): Parameters where to input the data
+        model_params ([type]): Parameters where to input the model parameter values
+        data_xs ([type]): Input data points
+        data_ys ([type]): Class data points (0 or 1)
+        initial_point ([type]): Initial set of parameters for the model
+
+    Returns:
+        model_values [list]: Optimal parameter values found by the optimizer
+        loss [float]: Final cost value
+        nfev [int]: Number of iteration done by the optimizer
+    """
+
+    target_values = 1 - 2*data_ys
+
+    add_measurements = quantum_instance.backend_name != 'statevector_simulator'
+    
+    def cost_function(model_values):
+
+        all_circuits = prepare_all_circuits(model_circuit,data_params,model_params,data_xs,model_values,add_measurements)
+        all_results = quantum_instance.execute(all_circuits)
+        expectation_values = all_results_to_expectation_values(all_results)
+        all_costs = eval_cost_fct(expectation_values,target_values)
+        return np.sum(all_costs)/len(all_costs)
+    
+    model_values, loss, nfev = optimizer.optimize(len(model_params), cost_function, initial_point=initial_point)
+
+    return model_values, loss, nfev
+
+from qiskit.algorithms.optimizers import SPSA, COBYLA, SLSQP
+from activity_1_utils import spsa_optimizer_callback
+from activity_1_figure_utils import history_figure
+from activity_1_circuits import build_rotation_model_circuit, build_linear_model_circuit, build_layered_model_circuit
+import time
+
+# model = 'rotation'
+model = 'linear'
+# model = 'layered'
+if model == 'rotation':
+    classifier_circuit, data_params, model_params = build_rotation_model_circuit()
+    initial_point = [0,0]
+elif model == 'linear':
+    classifier_circuit, data_params, model_params = build_linear_model_circuit()
+    initial_point = [0,0,1,1]
+elif model == 'layered':
+    n_layers = 4
+    classifier_circuit, data_params, model_params = build_layered_model_circuit(n_layers)
+    initial_point = [0,0] * n_layers + [1,1] * n_layers
+
+t0 = time.time()
+
+train_history = []
+optimizer = SPSA(maxiter=50, callback=lambda n, p, v, ss, sa: spsa_optimizer_callback(n, p, v, ss, sa, train_history))
+
+model_values, loss, nfev = train_classifier(
+    optimizer,eval_cost_fct_quadratic,sv_quantum_instance,
+    classifier_circuit,data_params,model_params,data_xs,data_ys,initial_point
+    )
+
+fig = history_figure(train_history)
+fig.show()
+print(model_values)
+print(f'{time.time() - t0:.2f} sec')
+
+all_circuits = prepare_all_circuits(classifier_circuit,data_params,model_params,data_xs,model_values,add_measurements=False)
+statevectors = circuits_to_statevectors(all_circuits)
+fig = bloch_sphere_statevector_figure(statevectors,data_ys)
+fig.show()
+
+def all_results_to_classifications(all_results):
+    """Convert result into class
+
+    Args:
+        all_results ([type]): Results from running QuantumCircuits
+
+    Returns:
+        np.array: Prediction class (0 or 1)
+    """
+    
+    expectation_values = all_results_to_expectation_values(all_results)
+    classifications = np.choose(expectation_values>0,[1,0])
+
+    return classifications
+
+
+def classify(quantum_instance,model_circuit,model_params,model_values,data_params,data_xs):
+    """Classify data point given a model, model values and a backend.
+
+    Args:
+        quantum_instance (Qiskit QuantumInstance): On which to run the QuantumCircuits.
+        model_circuit (QuantumCircuit): The parametrized QuantumCircuit model.
+        model_params ([type]): Parameters where to input the model parameter values
+        model_values ([type]): Parameter values to be used into the model
+        data_params ([type]): Parameters where to input the data
+        data_xs ([type]): Input data points
+
+    Returns:
+        np.array: Prediction class (0 or 1)
+    """
+
+    add_measurements = quantum_instance.backend_name != 'statevector_simulator'
+
+    all_circuits = prepare_all_circuits(model_circuit,data_params,model_params,data_xs,model_values,add_measurements)
+    all_results = quantum_instance.execute(all_circuits)
+    classifications = all_results_to_classifications(all_results)
+
+    return classifications
+
+from activity_1_figure_utils import classification_figure
+
+predictions_ys = classify(sv_quantum_instance,classifier_circuit,model_params,model_values,data_params,data_xs)
+fig = classification_figure(data_xs,data_ys,predictions_ys)
+fig.show()
+
+from qiskit import IBMQ
+from qiskit.visualization import plot_error_map
+
+IBMQ.save_account('8b091a65296c4e1150fe6a64c1e3b488a7e2db625432bf12bf7b400d6aa914d75c9bbac54ba3742c96832b9ab1a07bdb31c22e014f944370b8ef453d30d10d64')
+
+IBMQ.load_account()
+provider = IBMQ.get_provider(hub='ibm-q-education',group='qscitech-quantum',project='qc-bc-workshop')
+
+ibmq_jakarta = provider.get_backend('ibmq_jakarta')
+plot_error_map(ibmq_jakarta)
+
+ibmq_quantum_instance = QuantumInstance(ibmq_jakarta,shots=8192,initial_layout=[4,])
+
+predictions_ys = classify(ibmq_quantum_instance,classifier_circuit,model_params,model_values,data_params,data_xs)
+fig = classification_figure(data_xs,data_ys,predictions_ys)
+fig.show()
+

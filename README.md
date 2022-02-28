@@ -1,6 +1,5 @@
 # QML
 
-Project descriptions:
 
 ## Prediction of Brain Tumor Occurance from Genetic Markers: 
 

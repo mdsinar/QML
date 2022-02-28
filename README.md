@@ -1,5 +1,7 @@
-# QML
+# Project Descriptions
 
+This repo is for my personal projects for the implementation of QML for a variety of interesting fields. Most common modules used are Qiskit and Pennylane, although I hope to build new algorithms using Q# as well in the near future.
+Codes are free to use :) just give some credit.
 
 ## Prediction of Brain Tumor Occurance from Genetic Markers: 
 

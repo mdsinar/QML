@@ -1,5 +1,7 @@
 ##File Descriptions
 
+PLEASE SEE THE FILE (QML with Qiskit QNN-DoganSinar.pdf) FOR THE DISCUSSION AND ANALYSIS OF THE RESULTS.
+
 Mentor-2-Qiskit: Reference VQC with Z Feature Map encoding and TwoLocal ansatz
 
 Mentor-3-Qiskit: VQC 4, Z Feature Map encoding and Custom-2 ansatz

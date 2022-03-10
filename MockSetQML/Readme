@@ -1,0 +1,17 @@
+## File Descriptions
+
+Mentor-2-Qiskit: Reference VQC with Z Feature Map encoding and TwoLocal ansatz
+
+Mentor-3-Qiskit: VQC 4, Z Feature Map encoding and Custom-2 ansatz
+
+Mentor-4-Qiskit: VQC 2, ZZ Feature Map encoding and Custom-1 ansatz
+
+Mentor-5-Qiskit: VQC 3, Pauli Feature Map encoding and Custom-1 ansatz
+
+Mentor-6-Qiskit: VQC 1, Z Feature Map encoding and Custom-1 ansatz
+
+Mentor-7-Qiskit: Not included in the study.
+
+Mentor-8-Qiskit: VQC 5, ZZ Feature Map encoding and Custom-2 ansatz
+
+Mentor-9-Qiskit: VQC 6, Pauli Feature Map encoding and Custom-2 ansatz
